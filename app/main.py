@@ -63,16 +63,12 @@ def main():
         logger.error(f"Error en configuración: {e}")
         return
 
-    # Threads
+    # Reddit en segundo plano
     reddit_thread = threading.Thread(target=reddit_loop)
-    telegram_thread = threading.Thread(target=telegram_loop)
-
     reddit_thread.start()
-    telegram_thread.start()
 
-    # Mantener vivo el proceso
-    reddit_thread.join()
-    telegram_thread.join()
+    # Telegram en main thread (IMPORTANTE)
+    telegram_loop()
 
 
 if __name__ == "__main__":
