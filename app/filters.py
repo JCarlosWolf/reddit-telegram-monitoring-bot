@@ -10,6 +10,45 @@ class PostFilter:
     def __init__(self):
         self.storage = Storage()
 
+        # 🔥 INTENCIÓN REAL DE COMPRA
+        self.high_intent_keywords = [
+            "hiring",
+            "task",
+            "job",
+            "looking for",
+            "need someone",
+            "need help",
+            "developer needed",
+            "looking for developer",
+        ]
+
+        # ❌ BASURA / SCAM
+        self.negative_keywords = [
+            "us only",
+            "uk only",
+            "no experience",
+            "easy money",
+            "passive income",
+            "survey",
+            "referral",
+            "signup",
+            "earn money",
+            "dm me",
+        ]
+
+        # 🚀 HIGH VALUE (DINERO REAL)
+        self.high_value_keywords = [
+            "api",
+            "automation",
+            "scraping",
+            "data pipeline",
+            "shopify",
+            "ga4",
+            "tracking",
+            "pixel",
+            "analytics",
+        ]
+
     def _load_keywords(self) -> List[str]:
         return self.storage.get_keywords()
 
@@ -17,7 +56,7 @@ class PostFilter:
         keywords = self._load_keywords()
 
         if not keywords:
-            return True  # si no hay keywords → pasa todo
+            return True
 
         text = text.lower()
 
@@ -27,21 +66,51 @@ class PostFilter:
 
         return False
 
-    def is_valid_post(self, post) -> bool:
-        try:
-            title = getattr(post, "title", "") or ""
-            selftext = getattr(post, "selftext", "") or ""
+    def score_post(self, text: str, subreddit: str) -> int:
+        text = text.lower()
+        score = 0
 
-            combined_text = f"{title} {selftext}"
+        # =========================
+        # 🟢 INTENCIÓN DE COMPRA
+        # =========================
+        if any(k in text for k in self.high_intent_keywords):
+            score += 5
 
-            if not self.match_keywords(combined_text):
-                return False
+        # =========================
+        # 💰 DINERO (SEÑAL)
+        # =========================
+        if "$" in text or "€" in text or "£" in text:
+            score += 3
 
-            if len(combined_text.strip()) < 10:
-                return False
+        money_words = ["budget", "pay", "paid", "rate", "per hour"]
+        if any(w in text for w in money_words):
+            score += 2
 
-            return True
+        # =========================
+        # ⚡ URGENCIA
+        # =========================
+        if "urgent" in text or "asap" in text:
+            score += 2
 
-        except Exception as e:
-            logger.error(f"Error filtrando post: {e}")
-            return False
+        # =========================
+        # 📍 SUBREDDIT
+        # =========================
+        if subreddit == "forhire":
+            score += 2
+
+        if subreddit == "slavelabour":
+            score -= 3
+
+        # =========================
+        # 🚀 HIGH VALUE
+        # =========================
+        if any(k in text for k in self.high_value_keywords):
+            score += 3
+
+        # =========================
+        # ❌ NEGATIVOS
+        # =========================
+        if any(k in text for k in self.negative_keywords):
+            score -= 5
+
+        return score

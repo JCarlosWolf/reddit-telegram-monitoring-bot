@@ -3,10 +3,11 @@ import logging
 import threading
 
 from app.config import POLL_INTERVAL, validate_config
-from app.reddit_client import RedditClient
 from app.processor import Processor
 from app.telegram_bot import TelegramClient
 
+# 🔥 NUEVO: usamos scraper en vez de Reddit API
+from app.reddit_scraper import RedditScraper
 
 # =========================
 # LOGGING
@@ -19,56 +20,63 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def reddit_loop():
+def data_loop(telegram_client):
     """
-    Loop principal de Reddit
+    Loop principal de scraping
     """
-    logger.info("Iniciando loop de Reddit...")
+    logger.info("Iniciando loop en modo: SCRAPING")
 
-    reddit_client = RedditClient()
-    processor = Processor()
+    source = RedditScraper()
+    processor = Processor(telegram_client)
 
     while True:
         try:
             logger.info("Buscando nuevos posts...")
 
-            posts = reddit_client.get_new_posts(limit=10)
+            # 🔥 scraping directo
+            posts = source.get_posts(limit=10)
+
             processor.process_posts(posts)
 
             logger.info(f"Esperando {POLL_INTERVAL} segundos...\n")
             time.sleep(POLL_INTERVAL)
 
         except Exception as e:
-            logger.error(f"Error en Reddit loop: {e}")
+            logger.error(f"Error en loop principal: {e}")
             time.sleep(10)
-
-
-def telegram_loop():
-    """
-    Loop del bot de Telegram
-    """
-    logger.info("Iniciando bot de Telegram...")
-
-    bot = TelegramClient()
-    bot.run()
 
 
 def main():
     logger.info("Iniciando sistema completo...")
 
-    # Validación config
+    # =========================
+    # VALIDACIÓN CONFIG
+    # =========================
     try:
         validate_config()
     except Exception as e:
         logger.error(f"Error en configuración: {e}")
         return
 
-    # Reddit en segundo plano
-    reddit_thread = threading.Thread(target=reddit_loop)
-    reddit_thread.start()
+    # =========================
+    # TELEGRAM
+    # =========================
+    telegram_client = TelegramClient()
 
-    # Telegram en main thread (IMPORTANTE)
-    telegram_loop()
+    # =========================
+    # THREAD DE DATOS
+    # =========================
+    data_thread = threading.Thread(
+        target=data_loop,
+        args=(telegram_client,),
+        daemon=True
+    )
+    data_thread.start()
+
+    # =========================
+    # TELEGRAM EN MAIN THREAD
+    # =========================
+    telegram_client.run()
 
 
 if __name__ == "__main__":

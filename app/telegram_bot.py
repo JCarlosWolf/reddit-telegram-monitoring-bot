@@ -18,6 +18,10 @@ class TelegramClient:
         self.app.add_handler(CommandHandler("add", self.add_keyword))
         self.app.add_handler(CommandHandler("remove", self.remove_keyword))
         self.app.add_handler(CommandHandler("list", self.list_keywords))
+        from app.config import TELEGRAM_CHAT_ID
+        self.chat_id = TELEGRAM_CHAT_ID
+        import asyncio
+        self.loop = asyncio.get_event_loop()
 
     async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Bot activo")
@@ -51,3 +55,28 @@ class TelegramClient:
     def run(self):
         logger.info("Telegram bot corriendo...")
         self.app.run_polling()
+
+    async def _send_async(self, message: str):
+        await self.app.bot.send_message(
+            chat_id=self.chat_id,
+            text=message,
+            parse_mode="HTML"
+        )
+
+    def send_message(self, message: str):
+        """
+        Envío thread-safe hacia el loop de Telegram
+        """
+        import asyncio
+
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self.app.bot.send_message(
+                    chat_id=self.chat_id,
+                    text=message,
+                    parse_mode="HTML"
+                ),
+                self.loop
+            )
+        except Exception as e:
+            logger.error(f"Error enviando mensaje: {e}")

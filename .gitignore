@@ -1,5 +1,5 @@
-.env
-venv/
+.venv/
 __pycache__/
-data/bot.db
-.idea/
+.env
+data/
+*.db

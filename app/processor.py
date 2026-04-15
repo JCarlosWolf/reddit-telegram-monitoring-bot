@@ -1,88 +1,198 @@
 import logging
+import re
 
-from app.filters import PostFilter
 from app.storage import Storage
-from app.telegram_bot import TelegramClient
+from app.filters import PostFilter
 
 logger = logging.getLogger(__name__)
 
 
 class Processor:
-    def __init__(self):
-        """
-        Inicializa todos los componentes necesarios
-        """
-        try:
-            self.filter = PostFilter()
-            self.storage = Storage()
-            self.telegram = TelegramClient()
+    def __init__(self, telegram_client):
+        self.telegram = telegram_client
+        self.storage = Storage()
+        self.filter = PostFilter()
 
-            logger.info("Processor inicializado correctamente")
+        logger.info("Processor inicializado correctamente")
 
-        except Exception as e:
-            logger.error(f"Error inicializando Processor: {e}")
-            raise
+    # =========================
+    # 💰 EXTRAER PRESUPUESTO
+    # =========================
+    def extract_budget(self, text: str):
+        matches = re.findall(r"(?:\$|€|£)\s?(\d{2,4})", text)
+        numbers = [int(m) for m in matches]
 
-    def process_posts(self, posts: list):
-        """
-        Procesa una lista de posts
+        if not numbers:
+            return None
 
-        :param posts: lista de posts de Reddit
-        """
-        processed_count = 0
+        return max(numbers)
+
+    # =========================
+    # 📩 FORMATO MENSAJE
+    # =========================
+    def _format_post(self, post, score: int, budget=None) -> str:
+        title = getattr(post, "title", "Sin título")
+        subreddit = getattr(post, "subreddit", "reddit")
+        author = getattr(post, "author", "unknown")
+        url = getattr(post, "url", "")
+
+        budget_text = f"💰 Budget detectado: ${budget}\n" if budget else ""
+
+        return (
+            f"<b>{title}</b>\n\n"
+            f"🔥 Score: {score}\n"
+            f"{budget_text}"
+            f"📍 Subreddit: r/{subreddit}\n"
+            f"👤 Autor: {author}\n\n"
+            f"🔗 {url}\n\n"
+            f"👉 RESPONDER: {url}"
+        )
+
+    # =========================
+    # 🚀 PROCESADO
+    # =========================
+    def process_posts(self, posts):
+        sent_count = 0
 
         for post in posts:
             try:
-                post_id = post.id
+                post_id = getattr(post, "id", None)
 
-                # 1. Evitar duplicados
+                if not post_id:
+                    continue
+
                 if self.storage.exists_post_id(post_id):
-                    logger.debug(f"Post duplicado ignorado: {post_id}")
                     continue
 
-                # 2. Aplicar filtros
-                if not self.filter.is_valid_post(post):
+                title = getattr(post, "title", "").strip().lower()
+                selftext = getattr(post, "selftext", "").lower()
+                subreddit = getattr(post, "subreddit", "").lower()
+
+                text = f"{title} {selftext}"
+
+                # =========================
+                # ❌ FILTRO LOW QUALITY JOBS
+                # =========================
+                low_quality = [
+                    "side hustle",
+                    "social media managing",
+                    "recruiting",
+                    "telegram job",
+                    "easy work",
+                ]
+
+                if any(k in text for k in low_quality):
                     continue
 
-                # 3. Formatear mensaje
-                message = self._format_post(post)
+                # =========================
+                # ❌ BLOQUEAR VENDEDORES
+                # =========================
+                if "[for hire]" in title or "[offer]" in title:
+                    continue
 
-                # 4. Enviar a Telegram
+                if any(s in text for s in [
+                    "i will", "i'll", "my services", "contact me", "portfolio"
+                ]):
+                    continue
+
+                # =========================
+                # ❌ FILTRO BASURA
+                # =========================
+                bad_context = [
+                    "ghosted",
+                    "rant",
+                    "scam",
+                    "warning",
+                ]
+                if any(k in text for k in bad_context):
+                    continue
+
+                # =========================
+                # ❌ SPAM
+                # =========================
+                if any(s in text for s in [
+                    "earn", "survey", "passive income", "referral", "signup", "easy money"
+                ]):
+                    continue
+
+                # =========================
+                # ❌ GEO
+                # =========================
+                if "us only" in text or "uk only" in text:
+                    continue
+
+                # =========================
+                # ❌ PREGUNTAS
+                # =========================
+                if "?" in title:
+                    continue
+
+                # =========================
+                # 💰 PRESUPUESTO
+                # =========================
+                budget = self.extract_budget(text)
+
+                if budget:
+                    if budget < 15:
+                        continue
+
+                # =========================
+                # 🎯 INTENCIÓN
+                # =========================
+                intent_keywords = [
+                    "hiring",
+                    "looking for",
+                    "need help",
+                    "developer",
+                    "project",
+                ]
+
+                intent_score = 0
+
+                if any(k in text for k in intent_keywords):
+                    intent_score += 2
+
+                # =========================
+                # 📊 SCORING
+                # =========================
+                score = self.filter.score_post(text, subreddit) + intent_score
+
+                if budget:
+                    score += 2
+
+                print(f"DEBUG → score:{score} | budget:{budget} | {title[:60]}")
+
+                # =========================
+                # ❌ UMBRAL FINAL
+                # =========================
+                if score < 3:
+                    print(f"❌ filtered → score:{score} | {title[:60]}")
+                    continue
+
+                # =========================
+                # 💰 HIGH VALUE
+                # =========================
+                high_value = score >= 8
+
+                # =========================
+                # 📩 MENSAJE
+                # =========================
+                message = self._format_post(post, score, budget)
+
+                if high_value:
+                    message = "💰💰 HIGH VALUE LEAD 💰💰\n\n" + message
+
+                # =========================
+                # 🚀 ENVIAR
+                # =========================
                 self.telegram.send_message(message)
 
-                # 5. Guardar como procesado
                 self.storage.save_post_id(post_id)
 
-                processed_count += 1
-
-                logger.info(f"Post procesado y enviado: {post_id}")
+                logger.info(f"Post enviado: {post_id}")
+                sent_count += 1
 
             except Exception as e:
-                logger.error(f"Error procesando post {getattr(post, 'id', 'unknown')}: {e}")
+                logger.error(f"Error procesando post {getattr(post, 'id', 'N/A')}: {e}")
 
-        logger.info(f"Posts enviados en este ciclo: {processed_count}")
-
-    def _format_post(self, post) -> str:
-        """
-        Convierte un post en mensaje para Telegram
-        """
-        try:
-            title = getattr(post, "title", "Sin título")
-            url = getattr(post, "url", "")
-            subreddit = getattr(post, "subreddit", "")
-            score = getattr(post, "score", 0)
-            author = getattr(post, "author", "unknown")
-
-            message = (
-                f"<b>{title}</b>\n\n"
-                f"📍 Subreddit: r/{subreddit}\n"
-                f"👍 Score: {score}\n"
-                f"👤 Autor: {author}\n\n"
-                f"🔗 {url}"
-            )
-
-            return message
-
-        except Exception as e:
-            logger.error(f"Error formateando post: {e}")
-            return "Error formateando post"
+        logger.info(f"Posts enviados en este ciclo: {sent_count}")
