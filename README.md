@@ -1,4 +1,4 @@
-# 🚀 Real-Time Reddit → Telegram Monitoring System
+# 🚀 🚀 Reddit Lead Generation Bot (Freelance Opportunities → Telegram)
 
 A production-ready Python backend that monitors Reddit in real time, filters relevant content using dynamic keywords, and sends instant alerts to Telegram.
 
